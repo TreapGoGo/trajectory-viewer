@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Execution trajectories · Tuple</title>
+  <link rel="stylesheet" href="./viewer.css">
+  <script type="module" src="./viewer.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">Tuple <span> / </span> Trajectories</span>
+    <div class="account" id="account" hidden>
+      <span id="account-name"></span>
+      <button id="logout" type="button" class="quiet">Sign out</button>
+    </div>
+  </header>
+
+  <main class="signin" id="signin">
+    <form id="login" class="surface">
+      <h1>Execution trajectories</h1>
+      <p>Sign in with the Tuple account that uploaded the archives.</p>
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <div class="notice error" id="login-error" role="alert" hidden></div>
+      <button type="submit" class="primary">Sign in</button>
+    </form>
+  </main>
+
+  <main id="workspace" class="workspace" hidden>
+    <section class="heading">
+      <div>
+        <h1>Execution trajectories</h1>
+        <p>Cloud archives for this account</p>
+      </div>
+      <button id="refresh" type="button" class="quiet">Refresh</button>
+    </section>
+    <div class="layout">
+      <aside class="surface run-panel" aria-label="Trajectory list">
+        <form class="filters" id="filters">
+          <label>Status
+            <select name="status">
+              <option value="">All states</option>
+              <option value="succeeded">Succeeded</option>
+              <option value="failed">Failed</option>
+              <option value="running">Running</option>
+              <option value="interrupted">Interrupted</option>
+            </select>
+          </label>
+          <label>Invocation ID <input name="invocation_id" placeholder="Exact ID"></label>
+          <label>Prompt text <input name="prompt" type="search" maxlength="500" placeholder="Keyword or phrase"></label>
+          <label>Search in
+            <select name="role">
+              <option value="">User and system prompts</option>
+              <option value="user">User messages</option>
+              <option value="system">System prompts</option>
+            </select>
+          </label>
+          <div class="date-filters">
+            <label>From <input name="from" type="date"></label>
+            <label>Through <input name="through" type="date"></label>
+          </div>
+          <div class="actions">
+            <button type="submit" class="quiet">Apply filters</button>
+            <button id="stop-search" type="button" class="quiet" hidden>Stop search</button>
+          </div>
+        </form>
+        <div id="list-status" class="notice" role="status"></div>
+        <ul id="runs" class="runs"></ul>
+        <button id="more-runs" class="quiet more" type="button" hidden>Load more trajectories</button>
+      </aside>
+      <section class="surface detail" aria-label="Trajectory detail">
+        <div id="detail-status" class="notice" role="status">Select a trajectory to view its events.</div>
+        <div id="detail" hidden>
+          <div id="summary"></div>
+          <div id="related"></div>
+          <section id="failures" class="failures" aria-label="Failure events" hidden></section>
+          <section class="events-section">
+            <h2>Event timeline</h2>
+            <div class="timeline-filters">
+              <label>Event type
+                <select id="event-type">
+                  <option value="">All events</option>
+                  <option value="model">Model</option>
+                  <option value="tool">Tools</option>
+                  <option value="confirmation">Confirmation and interface</option>
+                  <option value="delivery">Delivery</option>
+                  <option value="other">Other execution events</option>
+                  <option value="error">Failures</option>
+                </select>
+              </label>
+              <label>Tool
+                <select id="event-tool"><option value="">All tools</option></select>
+              </label>
+            </div>
+            <p id="timeline-status" class="timeline-status" role="status"></p>
+            <button id="retry-events" class="quiet" type="button" hidden>Retry loading events</button>
+            <ol id="events" class="events"></ol>
+            <div class="actions timeline-pages">
+              <button id="previous-events" class="quiet" type="button" hidden>Previous events</button>
+              <button id="more-events" class="quiet" type="button" hidden>Next events</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
