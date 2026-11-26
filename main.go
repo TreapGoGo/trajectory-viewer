@@ -1,10 +1,22 @@
 // trajectory-viewer serves the account-scoped, read-only cloud archive browser.
+//
+// Workbench additions on top of the original viewer:
+//   - the workbench UI (ui/) at /, with the original UI kept under /classic/;
+//     -ui serves ui/ from disk instead, for editing without rebuilding,
+//   - a one-request "bundle" endpoint with an in-memory archive cache,
+//   - with -state: sessions that survive restarts (sealed with Windows DPAPI)
+//     and a local key file so command-line tools on this machine can read archives,
+//   - a transitional -dev-viewer mode that reuses another local viewer's session.
+//
+// api/index.js is a stateless port of the same HTTP API for Vercel.
 package main
 
 import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -17,18 +29,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
-//go:embed web/*
+//go:embed web/* ui/*
 var assets embed.FS
 
 const (
 	sessionCookie   = "trajectory_session"
 	deviceCookie    = "trajectory_device"
-	sessionTTL      = 8 * time.Hour
+	cliKeyHeader    = "X-Viewer-Key"
+	sessionTTL      = 30 * 24 * time.Hour
 	maxArchiveReply = 4 << 20
 )
 
@@ -43,14 +57,35 @@ type browserSession struct {
 	expires     time.Time
 }
 
+// archiveAuth is how one request reaches the archive: a backend token, or
+// (in -dev-viewer mode) the browser cookie of another local viewer.
+type archiveAuth struct {
+	name, token, cookie string
+}
+
+func (a archiveAuth) cacheScope() string {
+	sum := sha256.Sum256([]byte(a.token + "\x00" + a.cookie))
+	return hex.EncodeToString(sum[:6])
+}
+
 type viewer struct {
 	upstream *url.URL
 	origin   string
 	secure   bool
 	client   *http.Client
 
-	mu       sync.Mutex
-	sessions map[string]browserSession
+	uiDir     string
+	stateDir  string
+	cliKey    string
+	devViewer *url.URL
+
+	mu        sync.Mutex
+	sessions  map[string]browserSession
+	lastKey   string
+	devCookie string
+
+	cache    *archiveCache
+	upstreamSlots chan struct{}
 }
 
 func parseOrigin(raw string) (*url.URL, error) {
@@ -66,6 +101,9 @@ func main() {
 	upstream := flag.String("api-origin", os.Getenv("TRAJECTORY_API_ORIGIN"), "Tuple backend origin")
 	listen := flag.String("listen", "127.0.0.1:8765", "HTTP bind address")
 	public := flag.String("public-origin", "", "external HTTPS origin behind a TLS proxy")
+	uiDir := flag.String("ui", "", "serve the workbench UI from this directory (classic UI moves to /classic/)")
+	stateDir := flag.String("state", "", "directory for the encrypted session store and the local CLI key")
+	devViewer := flag.String("dev-viewer", "", "transitional: read archives through another local viewer's browser session")
 	flag.Parse()
 	api, err := parseOrigin(*upstream)
 	if err != nil {
@@ -87,10 +125,28 @@ func main() {
 		log.Fatal("-public-origin must be an HTTPS origin")
 	}
 	v := newViewer(api, publicURL)
+	if *uiDir != "" {
+		if info, err := os.Stat(*uiDir); err != nil || !info.IsDir() {
+			log.Fatal("-ui must be an existing directory")
+		}
+		v.uiDir = *uiDir
+	}
+	if *devViewer != "" {
+		dev, err := parseOrigin(*devViewer)
+		if err != nil {
+			log.Fatal("-dev-viewer: ", err)
+		}
+		v.devViewer = dev
+	}
+	if *stateDir != "" {
+		if err := v.enableState(*stateDir); err != nil {
+			log.Fatal("-state: ", err)
+		}
+	}
 	server := &http.Server{
 		Addr: *listen, Handler: v.routes(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
-		WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute,
+		WriteTimeout: 2 * time.Minute, IdleTimeout: time.Minute,
 	}
 	log.Printf("Trajectory viewer: %s", publicURL.String())
 	log.Fatal(server.ListenAndServe())
@@ -105,29 +161,73 @@ func newViewer(upstream, origin *url.URL) *viewer {
 				return http.ErrUseLastResponse
 			},
 		},
-		sessions: make(map[string]browserSession),
+		sessions:  make(map[string]browserSession),
+		cache:     newArchiveCache(256 << 20),
+		upstreamSlots: make(chan struct{}, 12),
 	}
 }
 
+// enableState loads persisted sessions and the CLI key from dir, creating both as needed.
+func (v *viewer) enableState(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	v.stateDir = dir
+	keyPath := filepath.Join(dir, "cli.key")
+	if raw, err := os.ReadFile(keyPath); err == nil && len(strings.TrimSpace(string(raw))) == 32 {
+		v.cliKey = strings.TrimSpace(string(raw))
+	} else {
+		v.cliKey = makeKey()
+		if err := os.WriteFile(keyPath, []byte(v.cliKey+"\n"), 0o600); err != nil {
+			return err
+		}
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if err := v.loadSessionsLocked(); err != nil {
+		log.Printf("session store not loaded: %v", err)
+	}
+	return nil
+}
+
 func (v *viewer) routes() http.Handler {
-	mux := http.NewServeMux()
+	inner := http.NewServeMux()
 	staticFiles, err := fs.Sub(assets, "web")
 	if err != nil {
 		panic(err)
 	}
 	files := http.FileServerFS(staticFiles)
 	for _, path := range []string{"/{$}", "/viewer.css", "/viewer.js", "/trajectory-tools.js"} {
-		mux.Handle("GET "+path, files)
+		inner.Handle("GET "+path, files)
 	}
-	mux.HandleFunc("GET /api/session", v.session)
-	mux.HandleFunc("POST /api/login", v.login)
-	mux.HandleFunc("POST /api/logout", v.logout)
-	mux.HandleFunc("GET /api/trajectories", v.readArchive)
-	mux.HandleFunc("GET /api/trajectories/{id}", v.readArchive)
-	mux.HandleFunc("GET /api/trajectories/{id}/events", v.readArchive)
-	mux.HandleFunc("GET /api/trajectories/{id}/payloads/{payload}", v.readArchive)
+	inner.HandleFunc("GET /api/session", v.session)
+	inner.HandleFunc("POST /api/login", v.login)
+	inner.HandleFunc("POST /api/logout", v.logout)
+	inner.HandleFunc("GET /api/trajectories", v.readArchive)
+	inner.HandleFunc("GET /api/trajectories/{id}", v.readArchive)
+	inner.HandleFunc("GET /api/trajectories/{id}/events", v.readArchive)
+	inner.HandleFunc("GET /api/trajectories/{id}/payloads/{payload}", v.readArchive)
+	inner.HandleFunc("GET /api/bundle/{id}", v.bundle)
+
+	workbench := http.Handler(nil)
+	if v.uiDir != "" {
+		workbench = http.FileServer(http.Dir(v.uiDir))
+	} else {
+		uiFiles, err := fs.Sub(assets, "ui")
+		if err != nil {
+			panic(err)
+		}
+		workbench = http.FileServerFS(uiFiles)
+	}
+	handler := http.NewServeMux()
+	classic := http.StripPrefix("/classic", inner)
+	handler.Handle("GET /classic/", classic)
+	handler.Handle("POST /classic/", classic)
+	handler.Handle("GET /api/", inner)
+	handler.Handle("POST /api/", inner)
+	handler.Handle("GET /", workbench)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
@@ -135,7 +235,7 @@ func (v *viewer) routes() http.Handler {
 			fail(w, http.StatusForbidden, "Invalid request origin.")
 			return
 		}
-		mux.ServeHTTP(w, r)
+		handler.ServeHTTP(w, r)
 	})
 }
 
@@ -162,6 +262,10 @@ func (v *viewer) call(ctx context.Context, method, path string, query url.Values
 		req.Header.Set("token", token)
 		req.Header.Set("device_flag", "1")
 	}
+	return v.do(req)
+}
+
+func (v *viewer) do(req *http.Request) (int, []byte, error) {
 	resp, err := v.client.Do(req)
 	if err != nil {
 		return 0, nil, err
@@ -172,6 +276,19 @@ func (v *viewer) call(ctx context.Context, method, path string, query url.Values
 		return 0, nil, errors.New("archive response too large")
 	}
 	return resp.StatusCode, raw, err
+}
+
+// devGet reads a path from the -dev-viewer with the browser cookie it issued.
+func (v *viewer) devGet(ctx context.Context, path string, query url.Values, cookie string) (int, []byte, error) {
+	u := v.devViewer.JoinPath(path)
+	u.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Cookie", cookie)
+	return v.do(req)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -219,25 +336,86 @@ func makeKey() string {
 	return hex.EncodeToString(raw[:])
 }
 
+// cliAuthorized reports whether the request carries this machine's CLI key.
+func (v *viewer) cliAuthorized(r *http.Request) bool {
+	got := r.Header.Get(cliKeyHeader)
+	return v.cliKey != "" && got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(v.cliKey)) == 1
+}
+
+// requestKeyLocked is the session a request speaks for: its browser cookie, or
+// for the local CLI the newest login (the backend keeps only the newest web
+// token per account, so older sessions are dead anyway).
+func (v *viewer) requestKeyLocked(r *http.Request) string {
+	key := cookieValue(r, sessionCookie)
+	if key == "" && v.cliAuthorized(r) {
+		var newest time.Time
+		for candidate, session := range v.sessions {
+			if session.expires.After(newest) {
+				key, newest = candidate, session.expires
+			}
+		}
+	}
+	return key
+}
+
 func (v *viewer) sessionFor(r *http.Request) (browserSession, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	key := cookieValue(r, sessionCookie)
+	key := v.requestKeyLocked(r)
 	session, ok := v.sessions[key]
 	if ok && time.Now().Before(session.expires) {
+		v.lastKey = key
 		return session, true
 	}
-	delete(v.sessions, key)
+	if ok {
+		delete(v.sessions, key)
+		v.saveSessionsLocked()
+	}
 	return browserSession{}, false
+}
+
+// authFor resolves how this request may read the archive.
+func (v *viewer) authFor(r *http.Request) (archiveAuth, bool) {
+	if v.devViewer != nil {
+		v.mu.Lock()
+		defer v.mu.Unlock()
+		if cookieValue(r, sessionCookie) != "" {
+			v.devCookie = sessionCookie + "=" + cookieValue(r, sessionCookie)
+			return archiveAuth{cookie: v.devCookie}, true
+		}
+		if v.cliAuthorized(r) && v.devCookie != "" {
+			return archiveAuth{cookie: v.devCookie}, true
+		}
+		return archiveAuth{}, false
+	}
+	session, ok := v.sessionFor(r)
+	return archiveAuth{name: session.name, token: session.token}, ok
 }
 
 func (v *viewer) forget(r *http.Request) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	delete(v.sessions, cookieValue(r, sessionCookie))
+	delete(v.sessions, v.requestKeyLocked(r))
+	v.saveSessionsLocked()
 }
 
 func (v *viewer) session(w http.ResponseWriter, r *http.Request) {
+	if v.devViewer != nil {
+		auth, ok := v.authFor(r)
+		if !ok {
+			fail(w, http.StatusUnauthorized, "Sign in to view cloud archives.")
+			return
+		}
+		status, raw, err := v.devGet(r.Context(), "/api/session", nil, auth.cookie)
+		if err != nil {
+			fail(w, http.StatusBadGateway, "The development viewer is unavailable.")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		_, _ = w.Write(raw)
+		return
+	}
 	session, ok := v.sessionFor(r)
 	if !ok {
 		fail(w, http.StatusUnauthorized, "Sign in to view cloud archives.")
@@ -262,17 +440,24 @@ func (v *viewer) pruneExpired() {
 }
 
 func (v *viewer) saveSession(w http.ResponseWriter, r *http.Request, data loginResult) {
-	v.forget(r)
 	key := makeKey()
 	v.mu.Lock()
-	v.pruneExpired()
+	// A new web login revokes this account's previous web token on the backend,
+	// and this local tool serves one person: start from a clean store.
+	clear(v.sessions)
 	v.sessions[key] = browserSession{data.Name, data.Token, time.Now().Add(sessionTTL)}
+	v.lastKey = key
+	v.saveSessionsLocked()
 	v.mu.Unlock()
 	v.cookie(w, sessionCookie, key, sessionTTL)
 	writeJSON(w, http.StatusOK, map[string]string{"name": data.Name})
 }
 
 func (v *viewer) login(w http.ResponseWriter, r *http.Request) {
+	if v.devViewer != nil {
+		fail(w, http.StatusNotImplemented, "Sign in on the development viewer instead.")
+		return
+	}
 	var credentials struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -320,19 +505,18 @@ func validArchiveID(id string) bool {
 }
 
 func (v *viewer) readArchive(w http.ResponseWriter, r *http.Request) {
-	session, ok := v.sessionFor(r)
+	auth, ok := v.authFor(r)
 	if !ok {
 		fail(w, http.StatusUnauthorized, "Sign in to view cloud archives.")
 		return
 	}
-	const base = "agent/trajectories"
-	path := base
+	sub := ""
 	if id := r.PathValue("id"); id != "" {
 		if !validArchiveID(id) {
 			fail(w, http.StatusBadRequest, "Invalid archive ID.")
 			return
 		}
-		path += "/" + id
+		sub += "/" + id
 	}
 	switch {
 	case r.PathValue("payload") != "":
@@ -341,9 +525,9 @@ func (v *viewer) readArchive(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "Invalid content ID.")
 			return
 		}
-		path += "/payloads/" + id
-	case r.Pattern == "GET /api/trajectories/{id}/events":
-		path += "/events"
+		sub += "/payloads/" + id
+	case strings.HasSuffix(r.Pattern, "/events"):
+		sub += "/events"
 	}
 	query := url.Values{}
 	for _, key := range []string{"cursor", "status", "agent_uid", "invocation_id", "from_at_ms", "to_at_ms", "limit", "after_seq", "children_after", "snapshot_seq"} {
@@ -351,13 +535,19 @@ func (v *viewer) readArchive(w http.ResponseWriter, r *http.Request) {
 			query.Set(key, value)
 		}
 	}
-	status, raw, err := v.call(r.Context(), http.MethodGet, path, query, session.token, nil)
+	status, raw, err := v.archiveGet(r.Context(), auth, sub, query, r.URL.Query().Get("fresh") == "1")
+	v.writeArchive(w, r, status, raw, err)
+}
+
+func (v *viewer) writeArchive(w http.ResponseWriter, r *http.Request, status int, raw []byte, err error) {
 	switch {
 	case err != nil || status >= 500:
 		fail(w, http.StatusBadGateway, "The cloud archive service is unavailable.")
 	case status == http.StatusUnauthorized:
-		v.forget(r)
-		v.cookie(w, sessionCookie, "", 0)
+		if v.devViewer == nil {
+			v.forget(r)
+			v.cookie(w, sessionCookie, "", 0)
+		}
 		fail(w, status, "Your sign-in expired. Sign in again.")
 	case status == http.StatusForbidden || status == http.StatusNotFound:
 		fail(w, status, "This archive is unavailable to your account.")

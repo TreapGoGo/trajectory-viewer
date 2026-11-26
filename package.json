@@ -1,0 +1,9 @@
+{
+  "name": "trajectory-viewer",
+  "private": true,
+  "type": "module",
+  "description": "Tuple Agent trajectory workbench: Go server (main.go), Vercel function (api/index.js), web UI (ui/), CLI (tv.mjs).",
+  "scripts": {
+    "test": "node --test digest.test.mjs trajectory-tools.test.mjs test/vercel-api.test.mjs"
+  }
+}

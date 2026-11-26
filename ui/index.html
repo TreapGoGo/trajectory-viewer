@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent 轨迹工作台</title>
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Agent 轨迹工作台<small id="brand-note">北京时间</small></div>
+    <div class="top-actions" id="account" hidden>
+      <label class="toggle" title="每 15 秒检查一次新运行"><input type="checkbox" id="live" checked><span class="live-dot on" id="live-dot"></span>自动刷新</label>
+      <button class="btn" id="refresh" type="button">刷新</button>
+      <a class="btn" id="classic-link" href="/classic/" target="_blank" rel="noopener" hidden>经典视图</a>
+      <span id="account-name"></span>
+      <button class="btn ghost" id="signout" type="button">退出</button>
+    </div>
+  </header>
+
+  <div class="empty" id="booting">正在连接…</div>
+
+  <main class="layout" id="workspace" hidden>
+    <aside class="sidebar">
+      <div class="filters">
+        <input class="search" id="search" type="search" placeholder="筛选：消息、回复、工具名、Invocation ID（按 / 聚焦）" autocomplete="off">
+        <div class="chips" id="ranges">
+          <button class="chip" data-days="1" type="button">今天</button>
+          <button class="chip on" data-days="3" type="button">近 3 天</button>
+          <button class="chip" data-days="7" type="button">近 7 天</button>
+          <button class="chip" data-days="30" type="button">近 30 天</button>
+          <label class="toggle"><input type="checkbox" id="show-system">系统运行</label>
+          <label class="toggle"><input type="checkbox" id="only-fail">只看有失败</label>
+        </div>
+      </div>
+      <div class="list-status" id="list-status">加载中…</div>
+      <div class="run-list" id="runs"></div>
+    </aside>
+    <section class="detail" id="detail">
+      <div class="empty" id="empty">
+        <h2>选一条运行</h2>
+        <p>左边每一行是一次 Agent 运行：主人发的消息、Agent 的回复、点卡片等操作。</p>
+        <p>快捷键：<kbd>J</kbd>/<kbd>K</kbd> 上下切换 · <kbd>1</kbd>–<kbd>4</kbd> 切换标签 · <kbd>/</kbd> 搜索</p>
+      </div>
+      <div id="turn" hidden></div>
+    </section>
+  </main>
+
+  <form class="signin" id="signin" hidden>
+    <h2>登录 Agent 轨迹工作台</h2>
+    <p>用上传轨迹的 Tuple 账号登录。只能看到这个账号上传的运行。登录一次后 30 天内不用再登录。</p>
+    <p>注意：同一个账号的网页登录同时只能有一个，在别的网页端登录会把这里挤掉。</p>
+    <label>邮箱<input name="email" type="email" autocomplete="username" required></label>
+    <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+    <div class="error" id="signin-error"></div>
+    <button class="btn primary" type="submit">登录</button>
+  </form>
+
+  <div class="toast" id="toast"></div>
+</body>
+</html>
