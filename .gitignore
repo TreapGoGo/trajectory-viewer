@@ -1,0 +1,8 @@
+# local login state and CLI key (never commit)
+state/
+
+# local builds
+*.exe
+
+node_modules/
+.vercel/
