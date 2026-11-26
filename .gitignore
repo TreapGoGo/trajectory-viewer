@@ -5,4 +5,7 @@ state/
 *.exe
 
 node_modules/
+
+# Vercel CLI link and pulled environment
 .vercel/
+.env*

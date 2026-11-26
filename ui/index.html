@@ -4,18 +4,25 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agent 轨迹工作台</title>
+  <script src="theme.js"></script>
   <link rel="stylesheet" href="app.css">
   <script type="module" src="app.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand">Agent 轨迹工作台<small id="brand-note">北京时间</small></div>
-    <div class="top-actions" id="account" hidden>
-      <label class="toggle" title="每 15 秒检查一次新运行"><input type="checkbox" id="live" checked><span class="live-dot on" id="live-dot"></span>自动刷新</label>
-      <button class="btn" id="refresh" type="button">刷新</button>
-      <a class="btn" id="classic-link" href="/classic/" target="_blank" rel="noopener" hidden>经典视图</a>
-      <span id="account-name"></span>
-      <button class="btn ghost" id="signout" type="button">退出</button>
+    <div class="top-right">
+      <div class="top-actions" id="account" hidden>
+        <label class="toggle" title="每 15 秒检查一次新运行"><input type="checkbox" id="live" checked><span class="live-dot on" id="live-dot"></span>自动刷新</label>
+        <button class="btn" id="refresh" type="button">刷新</button>
+        <a class="btn" id="classic-link" href="/classic/" target="_blank" rel="noopener" hidden>经典视图</a>
+        <span id="account-name"></span>
+        <button class="btn ghost" id="signout" type="button">退出</button>
+      </div>
+      <button class="btn theme-toggle" id="theme-toggle" type="button" title="切换白天 / 夜间">
+        <span class="when-light"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.7 14.6A8.6 8.6 0 0 1 9.4 3.3a.6.6 0 0 0-.8-.7A10 10 0 1 0 21.4 15.4a.6.6 0 0 0-.7-.8Z"/></svg>夜间</span>
+        <span class="when-dark"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 1.8v2.4M12 19.8v2.4M1.8 12h2.4M19.8 12h2.4M4.8 4.8l1.7 1.7M17.5 17.5l1.7 1.7M4.8 19.2l1.7-1.7M17.5 6.5l1.7-1.7"/></svg>白天</span>
+      </button>
     </div>
   </header>
 
@@ -50,7 +57,6 @@
   <form class="signin" id="signin" hidden>
     <h2>登录 Agent 轨迹工作台</h2>
     <p>用上传轨迹的 Tuple 账号登录。只能看到这个账号上传的运行。登录一次后 30 天内不用再登录。</p>
-    <p>注意：同一个账号的网页登录同时只能有一个，在别的网页端登录会把这里挤掉。</p>
     <label>邮箱<input name="email" type="email" autocomplete="username" required></label>
     <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
     <div class="error" id="signin-error"></div>

@@ -1,0 +1,6 @@
+# never upload local login state, keys or builds
+state/
+*.exe
+.vercel/
+node_modules/
+.env*

@@ -29,34 +29,34 @@
   --sidebar: 380px;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --panel-2: #1b1f27;
-    --ink: #e6e8ec;
-    --ink-2: #c7ccd5;
-    --muted: #9aa1ad;
-    --faint: #6b7280;
-    --line: #2a2f3a;
-    --line-2: #232833;
-    --accent: #6ea0ff;
-    --accent-soft: #1c2740;
-    --good: #4ade80;
-    --good-soft: #14281c;
-    --bad: #fb923c;
-    --bad-strong: #f87171;
-    --bad-soft: #2c1a14;
-    --warn: #fbbf24;
-    --warn-soft: #2b2312;
-    --think: #1e1b29;
-    --think-line: #3b3355;
-    --tool: #151b25;
-    --tool-line: #2a3a52;
-    --code: #12151b;
-    --shadow: none;
-    color-scheme: dark;
-  }
+/* theme.js sets data-theme on <html> before first paint: the saved choice,
+   otherwise the system preference. */
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1b1f27;
+  --ink: #e6e8ec;
+  --ink-2: #c7ccd5;
+  --muted: #9aa1ad;
+  --faint: #6b7280;
+  --line: #2a2f3a;
+  --line-2: #232833;
+  --accent: #6ea0ff;
+  --accent-soft: #1c2740;
+  --good: #4ade80;
+  --good-soft: #14281c;
+  --bad: #fb923c;
+  --bad-strong: #f87171;
+  --bad-soft: #2c1a14;
+  --warn: #fbbf24;
+  --warn-soft: #2b2312;
+  --think: #1e1b29;
+  --think-line: #3b3355;
+  --tool: #151b25;
+  --tool-line: #2a3a52;
+  --code: #12151b;
+  --shadow: none;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -89,7 +89,15 @@ a { color: var(--accent); }
 }
 .brand { font-weight: 650; letter-spacing: .2px; }
 .brand small { color: var(--muted); font-weight: 400; margin-left: 8px; }
-.top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.top-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.top-actions { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+/* The button names the mode it switches to. */
+.theme-toggle { display: inline-flex; align-items: center; }
+.theme-toggle svg { width: 14px; height: 14px; flex: none; }
+.theme-toggle > span { display: inline-flex; align-items: center; gap: 5px; }
+.theme-toggle > .when-dark { display: none; }
+:root[data-theme="dark"] .theme-toggle > .when-dark { display: inline-flex; }
+:root[data-theme="dark"] .theme-toggle > .when-light { display: none; }
 .btn {
   border: 1px solid var(--line);
   background: var(--panel);
@@ -278,12 +286,10 @@ details.fold[open] > summary::before { content: "▾ "; }
 .j-bool { color: #b45309; }
 .j-null { color: var(--faint); }
 .j-meta { color: var(--faint); }
-@media (prefers-color-scheme: dark) {
-  .j-key { color: #d2a8ff; }
-  .j-str { color: #7ee787; }
-  .j-num { color: #79c0ff; }
-  .j-bool { color: #f0b46a; }
-}
+:root[data-theme="dark"] .j-key { color: #d2a8ff; }
+:root[data-theme="dark"] .j-str { color: #7ee787; }
+:root[data-theme="dark"] .j-num { color: #79c0ff; }
+:root[data-theme="dark"] .j-bool { color: #f0b46a; }
 
 /* context */
 .round-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; align-items: center; }
